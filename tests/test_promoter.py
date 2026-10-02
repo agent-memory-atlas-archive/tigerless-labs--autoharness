@@ -247,14 +247,14 @@ def test_reject_poison_subfile_zero_disk(tmp_path):
     assert not _sdir(roots).exists()  # zero on-disk change: no subfiles, no evidence, no SKILL.md
 
 
-def test_landing_symlink_escape_rejected_zero_write(tmp_path):
+def test_landing_symlink_escape_rejected_zero_write(tmp_path, dir_link):
     roots = _roots(tmp_path)
     root = roots["project"]
     skill_store.write_body("project", "foo", GOOD_BODY, root)
     sidecar.create("project", "foo", 0, root)
     outside = tmp_path / "outside"
     outside.mkdir()
-    (_sdir(roots) / "scripts").symlink_to(outside)  # attacker pre-planted symlink out of the tree
+    dir_link(_sdir(roots) / "scripts", outside)  # attacker pre-planted symlink out of the tree
     intent = {"action": "update", "name": "foo", "body": FILES_BODY,
               "files": {"scripts/run.sh": "pwned\n"}, "reason": "r", "evidence": "e"}
     v = promoter.promote(intent, roots=roots)
@@ -361,7 +361,7 @@ def test_remove_file_evidence_slice_rejected_zero_disk(tmp_path):
     assert (_sdir(roots) / slice_rel).exists()  # provenance untouched
 
 
-def test_remove_file_symlink_escape_rejected(tmp_path):
+def test_remove_file_symlink_escape_rejected(tmp_path, dir_link):
     roots = _roots(tmp_path)
     root = roots["project"]
     skill_store.write_body("project", "foo", NO_REF_BODY, root)
@@ -370,7 +370,7 @@ def test_remove_file_symlink_escape_rejected(tmp_path):
     outside.mkdir()
     victim = outside / "victim.sh"
     victim.write_text("keep me")
-    (_sdir(roots) / "scripts").symlink_to(outside)
+    dir_link(_sdir(roots) / "scripts", outside)
     v = promoter.promote(_remove(path="scripts/victim.sh"), roots=roots)
     assert not v["ok"] and "landing" in _families(v)
     assert victim.read_text() == "keep me"  # nothing outside the skill dir was touched
