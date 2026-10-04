@@ -24,7 +24,7 @@ validating admission (validate in-flight, persist only on allow) + POSIX atomic-
   exactly-once); on startup sweep orphan .tmp. On a crash, unprocessed intents stay in the durable queue
   and are retried next time; in the extreme of never running → zero land (fail-safe).
 
-ponytail: a single synchronous process already satisfies "serial single writer"; cross-process locking see mng open. LED watermark still pends true values from CAP; the create anchor reads the layer request counter at land time (probation is fiction without a true anchor). Whole-run clear, the tiny crash window (between land and clear) may re-append the LED — per-item idempotent watermark pending the intent-queue granularity being finalized (validate-store open).
+ponytail: one drain per project root is now serialized through lib.lock (see drain). LED watermark still pends true values from CAP; the create anchor reads the layer request counter at land time (probation is fiction without a true anchor). Whole-run clear, the tiny crash window (between land and clear) may re-append the LED — per-item idempotent watermark pending the intent-queue granularity being finalized (validate-store open).
 """
 import hashlib
 import json
@@ -36,6 +36,7 @@ from autoharness.lib import (
     intent_queue,
     layer,
     ledger,
+    lock,
     notify,
     redact,
     sidecar,
@@ -238,14 +239,20 @@ def _account(run_id, intents, verdicts, proot):
 
 def drain(run_id, *, roots=None, repo_name=None):
     roots = roots or {}
-    sweep(roots)
     proot = roots.get(layer.PROJECT)
-    intents = intent_queue.read(run_id, proot)
-    verdicts = [promote(i, roots=roots, repo_name=repo_name) for i in intents]
-    record = _account(run_id, intents, verdicts, proot) if intents else None
-    intent_queue.clear(run_id, proot)
+    # One drain per project root at a time. A hook is a short-lived process, so two passes on the same
+    # state dir (parallel worktrees remapped to one root, or a killed session leaving a detached
+    # promotion running) interleave at the file level: each reads the library without seeing the
+    # other's skill, and each lands. Held across read→land→clear, which also closes the crash window
+    # the account comment below used to leave open to an external writer.
+    with lock.file_lock(layer.state_dir(layer.PROJECT, proot) / "drain.lock"):
+        sweep(roots)
+        intents = intent_queue.read(run_id, proot)
+        verdicts = [promote(i, roots=roots, repo_name=repo_name) for i in intents]
+        record = _account(run_id, intents, verdicts, proot) if intents else None
+        intent_queue.clear(run_id, proot)
     if record:
-        # after clear, not inside _account: an external process in the land→clear window would
-        # widen the crash window where a whole run replays (duplicate LED, re-rejected creates)
+        # after clear and outside the lock: the notification is fire-and-forget and must not hold
+        # the next pass out of the state dir
         notify.send(record)
     return verdicts
