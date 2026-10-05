@@ -57,8 +57,8 @@ form. Always install as a plugin to match both names.
 
 ### Update
 
-Update from a terminal — refresh the catalog, then update with the **full `plugin@marketplace`
-id**, then restart:
+Update from a terminal — refresh the catalog by marketplace name, then update the plugin by its
+**full `plugin@marketplace` id**, then restart:
 
 ```
 claude plugin marketplace update autoharness       
