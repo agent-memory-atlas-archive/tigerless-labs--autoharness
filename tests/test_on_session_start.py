@@ -118,6 +118,23 @@ def test_index_lists_agent_skills_grouped_by_category(tmp_path):
     assert "[project]" in ctx and "use when a" in ctx
 
 
+def test_index_carries_probation_members_the_caps_do_not_count(tmp_path, monkeypatch):
+    # The capacity caps bound the mature pool, not the index. A member in probation is live and
+    # recalled as usual and is never counted against the cap, so a project capped at 1 carries four
+    # more index lines than its cap. Stated on the AUTOHARNESS_CAPACITY_* rows, so this pins it.
+    _small_knobs(monkeypatch, cap_project=1)
+    roots = _roots(tmp_path)
+    _set_requests(roots, "project", 100)
+    _seed(roots, "mature-one", calls=80, anchor=0)  # denom 100 >= maturity 10 -> mature, top of pool
+    for i in range(4):
+        _seed(roots, f"probation-{i}", calls=1, anchor=95)  # denom 5 < 10 -> probation, outside the cap
+
+    out = on_session_start.on_session_start(roots=roots)
+    assert out["archived"]["project"] == []  # the cap is at 1 and the mature pool is at 1
+    lines = [ln for ln in out["context"].splitlines() if ln.startswith("- ")]
+    assert len(lines) == 5  # one mature + four probation the cap never saw
+
+
 def test_index_excludes_native_and_archived_and_empty_is_none(tmp_path):
     roots = _roots(tmp_path)
     out = on_session_start.on_session_start(roots=roots)

@@ -135,9 +135,9 @@ def test_project_root_worktree_outside_repo_maps_to_main_root(main_repo, tmp_pat
     assert _project_root_at(monkeypatch, wt) == main_repo / ".claude"
 
 
-def test_worktree_root_cache_normalizes_symlink(linked_worktree, main_repo, tmp_path):
+def test_worktree_root_cache_normalizes_symlink(linked_worktree, main_repo, tmp_path, dir_link):
     alias = tmp_path / "worktree-alias"
-    alias.symlink_to(linked_worktree, target_is_directory=True)
+    dir_link(alias, linked_worktree)
     layer._main_worktree_root_resolved.cache_clear()
 
     assert layer._main_worktree_root(str(alias)) == main_repo

@@ -30,7 +30,7 @@ def test_reflector_body_binds_emit_only():
 
 def test_reflector_body_teaches_folder_skill():
     body = AGENT.read_text()
-    for token in ("files", "scripts/", "templates/", "references/", "class-level"):
+    for token in ("files", "scripts/", "templates/", "references/", "assets/", "class-level"):
         assert token in body
 
 
