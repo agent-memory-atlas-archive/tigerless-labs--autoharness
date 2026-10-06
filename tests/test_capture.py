@@ -228,3 +228,50 @@ def test_window_does_not_read_the_history_it_skips(tmp_path, monkeypatch):
         f"read {sum(read_sizes)} bytes to return the last {len(tail)}; "
         f"the skipped history is {len(prefix)} bytes"
     )
+
+
+def test_window_growth_after_size_snapshot_stays_after_watermark(tmp_path, monkeypatch):
+    import builtins
+
+    transcript = tmp_path / "transcript.jsonl"
+    prefix = (json.dumps(_record(0, "old")) + "\n").encode()
+    growth = (json.dumps(_record(1, "fresh")) + "\n").encode()
+    transcript.write_bytes(prefix)
+
+    real_open = builtins.open
+    grew = False
+
+    class GrowingReader:
+        def __init__(self, handle):
+            self._handle = handle
+
+        def read(self, size=-1):
+            return self._handle.read(size)
+
+        def seek(self, offset, whence=0):
+            nonlocal grew
+            position = self._handle.seek(offset, whence)
+            if whence == 2 and not grew:
+                with real_open(transcript, "ab") as writer:
+                    writer.write(growth)
+                grew = True
+            return position
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return self._handle.__exit__(*exc)
+
+    def growing_open(file, mode="r", *args, **kwargs):
+        return GrowingReader(real_open(file, mode, *args, **kwargs))
+
+    monkeypatch.setattr(capture, "open", growing_open, raising=False)
+
+    first, offset = capture.window(transcript, offset=len(prefix))
+    second, new_offset = capture.window(transcript, offset=offset)
+
+    assert first == ""
+    assert offset == len(prefix)
+    assert "fresh" in second
+    assert new_offset == len(prefix) + len(growth)

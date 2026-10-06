@@ -42,7 +42,7 @@ def window(transcript_path, offset=0, *, max_record_bytes=None, max_window_bytes
         if not 0 <= offset <= new_offset:
             offset = 0
         f.seek(offset)
-        tail = f.read()
+        tail = f.read(new_offset - offset)
     lines = [_clip(line, record_cap)
              for line in tail.decode("utf-8", errors="replace").splitlines()]
     kept, total = [], 0
