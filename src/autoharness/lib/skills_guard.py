@@ -47,8 +47,8 @@ FAMILIES = {
     ],
     "obfuscation": [
         r"base64\s+(-d|--decode)",
-        r"\beval\s*\(",
-        r"\bexec\s*\(",
+        r"\beval\s*\((?!\s*\))",
+        r"\bexec\s*\((?!\s*\))",
         r"(\\x[0-9a-fA-F]{2}){4,}",
         r"\bfromhex\b",
     ],
