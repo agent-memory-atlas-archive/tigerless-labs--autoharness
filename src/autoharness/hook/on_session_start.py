@@ -57,7 +57,7 @@ def recall_index(roots, cwd=None):
     if config.INDEX_SUSPENDED:
         return None
     groups, has_project = {}, False
-    for lyr in layer.LAYERS:
+    for lyr in config.active_layers():
         root = roots.get(lyr)
         skills = layer.skills_dir(lyr, root)
         if not skills.exists():
@@ -133,7 +133,7 @@ def _members(lyr, root):
 def on_session_start(event=None, *, roots=None):
     roots = roots or {}
     archived = {}
-    for lyr in layer.LAYERS:
+    for lyr in config.active_layers():
         root = roots.get(lyr)
         names = lifecycle.evaluate(
             _members(lyr, root), counters.request_count(lyr, root),

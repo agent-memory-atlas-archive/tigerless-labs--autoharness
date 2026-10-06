@@ -18,6 +18,7 @@ window is deferred with the same open question in mng.md.
 """
 import json
 
+from autoharness import config
 from autoharness.lib import layer, ledger, sidecar, skill_store, validate
 
 
@@ -129,4 +130,4 @@ def _layer_metrics(lyr, root):
 
 def collect(roots=None):
     roots = roots or {}
-    return {lyr: _layer_metrics(lyr, roots.get(lyr)) for lyr in layer.LAYERS}
+    return {lyr: _layer_metrics(lyr, roots.get(lyr)) for lyr in config.active_layers()}

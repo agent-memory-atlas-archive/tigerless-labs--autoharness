@@ -36,7 +36,7 @@ log = logging.getLogger(__name__)
 def description_index(roots=None, *, agent_only=False):
     roots = roots or {}
     lines = []
-    for lyr in layer.LAYERS:
+    for lyr in config.active_layers():
         root = roots.get(lyr)
         skills = layer.skills_dir(lyr, root)
         if not skills.exists():
@@ -182,7 +182,7 @@ def _snapshot_skills(run_id, roots):
     manual unpack; rotation keeps SNAPSHOT_KEEP per layer."""
     snapdir = layer.state_dir(layer.PROJECT, roots.get(layer.PROJECT)) / "snapshots"
     snapdir.mkdir(parents=True, exist_ok=True)
-    for lyr in layer.LAYERS:
+    for lyr in config.active_layers():
         skills = layer.skills_dir(lyr, roots.get(lyr))
         if not skills.exists():
             continue

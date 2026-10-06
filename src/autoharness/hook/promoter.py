@@ -30,6 +30,7 @@ import hashlib
 import json
 import re
 
+from autoharness import config
 from autoharness.lib import (
     atomic,
     counters,
@@ -154,6 +155,9 @@ def promote(intent, *, roots=None, repo_name=None):
         return _reject(action, None, [("routing", str(exc))])
     if level not in layer.LAYERS:
         return _reject(action, level, [("routing", f"unresolved/illegal level: {level!r}")])
+    if level == layer.GLOBAL and config.DISABLE_GLOBAL:
+        return _reject(action, level,
+                       [("routing", "global layer is disabled by AUTOHARNESS_DISABLE_GLOBAL")])
 
     root = roots.get(level)
     try:
@@ -206,7 +210,7 @@ def _notes(action, body):
 def sweep(roots=None):
     roots = roots or {}
     removed = []
-    for lyr in layer.LAYERS:
+    for lyr in config.active_layers():
         removed += skill_store.sweep_orphans(lyr, roots.get(lyr))
     return removed
 

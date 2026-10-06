@@ -11,6 +11,7 @@ import os
 import shutil
 import time
 
+from autoharness import config
 from autoharness.lib import atomic, layer
 
 SKILL_FILE = "SKILL.md"
@@ -47,7 +48,7 @@ def exists(lyr, name, root=None):
 
 def find(name, roots=None):
     roots = roots or {}
-    hits = [lyr for lyr in layer.LAYERS if exists(lyr, name, roots.get(lyr))]
+    hits = [lyr for lyr in config.active_layers() if exists(lyr, name, roots.get(lyr))]
     if len(hits) > 1:
         raise ValueError(f"ambiguous skill {name!r} present in layers {hits}")
     return hits[0] if hits else None
