@@ -1,4 +1,6 @@
+import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -361,3 +363,57 @@ def test_snapshot_failure_never_blocks_the_run(tmp_path, monkeypatch):
     called = []
     spawn.run_curator("c1", roots=roots, spawn_fn=lambda a, e, b: called.append(1))
     assert called  # a transient disk issue must not silently disable curation
+
+
+# --- #160: a crashed reflector must not fail silently (stderr was captured and discarded) ---
+
+def test_detached_spawn_reports_child_crash_on_stderr(capsys):
+    argv = [sys.executable, "-c",
+            "import sys; print('reflector died', file=sys.stderr); raise SystemExit(3)"]
+    proc = spawn._detached_spawn(argv, {}, "bundle")
+    assert proc.returncode == 3
+    assert "reflector died" in capsys.readouterr().err
+
+
+def test_run_records_spawn_error_in_run_account(tmp_path):
+    roots = _roots(tmp_path)
+    secret = "ghp_" + "a" * 36
+    crash = subprocess.CompletedProcess([config.CLAUDE_BIN], 3, "",
+                                        f"Error: agent not found; token={secret}")
+    verdicts = spawn.run("WINDOW", "run-x", roots=roots, spec_path=config.FORMAT_SPEC,
+                         spawn_fn=lambda a, e, b: crash)
+    assert verdicts == []
+    account = json.loads((roots["project"] / "autoharness" / "runs" / "run-x.json").read_text())
+    assert account["run_id"] == "run-x"
+    assert account["spawn_error"]["returncode"] == 3
+    assert "agent not found" in account["spawn_error"]["stderr_tail"]
+    assert secret not in account["spawn_error"]["stderr_tail"]
+    assert "REDACTED" in account["spawn_error"]["stderr_tail"]
+
+
+def test_spawn_error_record_preserves_landed_verdicts(tmp_path):
+    roots = _roots(tmp_path)
+
+    def crashed_after_staging(argv, env, bundle):
+        from autoharness.lib import intent_queue
+        intent_queue.append(env[config.RUN_ID_ENV],
+                            {"action": "create", "name": "learned", "level": "project",
+                             "body": GOOD.format(n="learned", d="use when doing a specific thing"),
+                             "reason": "compare-first new", "evidence": "window slice"},
+                            roots["project"])
+        return subprocess.CompletedProcess(argv, 3, "", "late crash")
+
+    verdicts = spawn.run("WINDOW", "run-x", roots=roots, spec_path=config.FORMAT_SPEC,
+                         spawn_fn=crashed_after_staging)
+    assert [v["ok"] for v in verdicts] == [True]
+    account = json.loads((roots["project"] / "autoharness" / "runs" / "run-x.json").read_text())
+    assert account["spawn_error"]["returncode"] == 3
+    assert account["verdicts"]  # child diagnostics augment, never replace, promoter verdicts
+
+
+def test_successful_spawn_writes_no_spawn_error(tmp_path):
+    roots = _roots(tmp_path)
+    ok = subprocess.CompletedProcess([config.CLAUDE_BIN], 0, "", "")
+    spawn.run("WINDOW", "run-ok", roots=roots, spec_path=config.FORMAT_SPEC,
+              spawn_fn=lambda a, e, b: ok)
+    assert not (roots["project"] / "autoharness" / "runs" / "run-ok.json").exists()
