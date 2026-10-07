@@ -359,10 +359,27 @@ def test_snapshot_rotation_keeps_newest(tmp_path, monkeypatch):
 
 def test_snapshot_failure_never_blocks_the_run(tmp_path, monkeypatch):
     roots = _snap_roots(tmp_path)
+    bodies = {root: (root / "skills" / "x" / "SKILL.md").read_text()
+              for root in roots.values()}
     monkeypatch.setattr(spawn, "_snapshot_skills", lambda *a, **k: (_ for _ in ()).throw(OSError("disk")))
     called = []
     spawn.run_curator("c1", roots=roots, spawn_fn=lambda a, e, b: called.append(1))
     assert called  # a transient disk issue must not silently disable curation
+    assert all((root / "skills" / "x" / "SKILL.md").read_text() == body
+               for root, body in bodies.items())
+
+
+def test_unexpected_snapshot_failure_is_logged(tmp_path, monkeypatch, caplog):
+    roots = _snap_roots(tmp_path)
+    monkeypatch.setattr(spawn, "_snapshot_skills",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("snapshot bug")))
+    called = []
+
+    spawn.run_curator("c1", roots=roots, spawn_fn=lambda a, e, b: called.append(1))
+
+    assert called  # reporting a programming error does not change curator scheduling
+    assert "unexpected snapshot error" in caplog.text
+    assert "RuntimeError: snapshot bug" in caplog.text
 
 
 # --- #160: a crashed reflector must not fail silently (stderr was captured and discarded) ---

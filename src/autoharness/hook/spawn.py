@@ -11,6 +11,7 @@ here: the reflector only appends intents, the promoter exclusively validates and
 ponytail: run() is the body of the "detached background job" (synchronous spawn→wait→drain); the "do not block the host Stop" detach is started in the background at the hook top level by the Phase 7 dispatch calling run(). spawn_fn is injectable (system tests use a fake reflector script in place of the real claude). Precise handling of the transcript upper-bound race (cap.md open) is still tolerated at v0.
 """
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -28,6 +29,8 @@ from autoharness.lib import (
     skill_store,
     validate,
 )
+
+log = logging.getLogger(__name__)
 
 
 def description_index(roots=None, *, agent_only=False):
@@ -195,8 +198,10 @@ def run_curator(run_id, *, roots, repo_name=None, agent=None, claude_bin=None,
     roots = roots or {}
     try:
         _snapshot_skills(run_id, roots)
+    except OSError:
+        pass  # a transient disk issue must not silently disable curation
     except Exception:
-        pass  # a transient disk issue must not silently disable curation (Hermes's exact trade-off)
+        log.exception('unexpected snapshot error; curator running without safety net')
     spec = (spec_path or config.FORMAT_SPEC).read_text()
     bundle = build_curator_bundle(description_index(roots, agent_only=True), spec)
 
