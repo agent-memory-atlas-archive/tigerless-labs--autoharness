@@ -28,6 +28,7 @@ ponytail: a single synchronous process already satisfies "serial single writer";
 """
 import hashlib
 import json
+import re
 
 from autoharness.lib import (
     atomic,
@@ -35,6 +36,7 @@ from autoharness.lib import (
     intent_queue,
     layer,
     ledger,
+    notify,
     redact,
     sidecar,
     skill_store,
@@ -109,7 +111,9 @@ def _remove_subfile(level, name, rel, root):
     if not p.resolve().is_relative_to(sdir):
         raise ValueError(f"subfile escapes the skill dir: {rel}")
     live = skill_store.read_body(level, name, root) or ""
-    if rel in live:
+    # Use word-boundary check so scripts/run.py does not match scripts/run.py.bak
+    _ref = re.compile(r"(?<![A-Za-z0-9_./-])" + re.escape(rel) + r"(?![A-Za-z0-9_./-])")
+    if _ref.search(live):
         raise ValueError(f"{rel} is still referenced by the live SKILL.md (patch the pointer out first)")
     if p.is_file():
         p.unlink()
@@ -130,7 +134,10 @@ def _land(action, intent, body, level, name, root):
     evidence_ref = _materialize_evidence(level, name, intent.get("evidence"), root)
     skill_store.write_body(level, name, body, root)
     if action == "create":
-        sidecar.create(level, name, counters.request_count(level, root), root)
+        existing = sidecar.read(level, name, root)
+        if not existing:
+            sidecar.create(level, name, counters.request_count(level, root), root)
+        # crash-replay: sidecar already exists — skip create to preserve counters
     else:
         sidecar.bump_patch(level, name, root)  # update/patch: feeds the reuse-after-improvement pair
     ledger.append(level, name, _led(intent, evidence_ref), root)
@@ -218,14 +225,15 @@ def _account(run_id, intents, verdicts, proot):
     state = layer.state_dir(layer.PROJECT, proot)
     runs = state / "runs"
     runs.mkdir(parents=True, exist_ok=True)
-    atomic.write_text(runs / f"{run_id}.json",
-                      json.dumps({"run_id": run_id, "verdicts": rows}, ensure_ascii=False, indent=2))
+    record = {"run_id": run_id, "verdicts": rows}
+    atomic.write_text(runs / f"{run_id}.json", json.dumps(record, ensure_ascii=False, indent=2))
     atomic.write_text(state / "last_run.json",
                       json.dumps({"run_id": run_id, "landed": landed,
                                   "rejected": len(rows) - landed, "absorbed": absorbed,
                                   "families": families,
                                   "uncategorized": sum(1 for r in rows if "category" in r["notes"])},
                                  ensure_ascii=False))
+    return record
 
 
 def drain(run_id, *, roots=None, repo_name=None):
@@ -234,7 +242,10 @@ def drain(run_id, *, roots=None, repo_name=None):
     proot = roots.get(layer.PROJECT)
     intents = intent_queue.read(run_id, proot)
     verdicts = [promote(i, roots=roots, repo_name=repo_name) for i in intents]
-    if intents:
-        _account(run_id, intents, verdicts, proot)
+    record = _account(run_id, intents, verdicts, proot) if intents else None
     intent_queue.clear(run_id, proot)
+    if record:
+        # after clear, not inside _account: an external process in the land→clear window would
+        # widen the crash window where a whole run replays (duplicate LED, re-rejected creates)
+        notify.send(record)
     return verdicts

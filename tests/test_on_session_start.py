@@ -118,6 +118,23 @@ def test_index_lists_agent_skills_grouped_by_category(tmp_path):
     assert "[project]" in ctx and "use when a" in ctx
 
 
+def test_index_carries_probation_members_the_caps_do_not_count(tmp_path, monkeypatch):
+    # The capacity caps bound the mature pool, not the index. A member in probation is live and
+    # recalled as usual and is never counted against the cap, so a project capped at 1 carries four
+    # more index lines than its cap. Stated on the AUTOHARNESS_CAPACITY_* rows, so this pins it.
+    _small_knobs(monkeypatch, cap_project=1)
+    roots = _roots(tmp_path)
+    _set_requests(roots, "project", 100)
+    _seed(roots, "mature-one", calls=80, anchor=0)  # denom 100 >= maturity 10 -> mature, top of pool
+    for i in range(4):
+        _seed(roots, f"probation-{i}", calls=1, anchor=95)  # denom 5 < 10 -> probation, outside the cap
+
+    out = on_session_start.on_session_start(roots=roots)
+    assert out["archived"]["project"] == []  # the cap is at 1 and the mature pool is at 1
+    lines = [ln for ln in out["context"].splitlines() if ln.startswith("- ")]
+    assert len(lines) == 5  # one mature + four probation the cap never saw
+
+
 def test_index_excludes_native_and_archived_and_empty_is_none(tmp_path):
     roots = _roots(tmp_path)
     out = on_session_start.on_session_start(roots=roots)
@@ -250,3 +267,33 @@ def test_index_suspended_still_lets_the_summary_through(tmp_path, monkeypatch):
         {"run_id": "r1", "landed": 1, "rejected": 0, "absorbed": 0, "families": []}))
     monkeypatch.setattr(config, "INDEX_SUSPENDED", True)
     assert "landed 1" in on_session_start.on_session_start(roots=roots)["context"]
+
+
+def test_index_points_worktree_session_at_remapped_project_skills(tmp_path):
+    # a linked worktree's project layer lives in the main checkout, which the host does not scan:
+    # the index must say where the skills are, or they are listed but unloadable
+    roots = _roots(tmp_path / "main")  # project dir = tmp/main; the worktree sits beside it
+    _seed_desc(roots, "a-skill", "use when a")
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+    ctx = on_session_start.on_session_start({"cwd": str(worktree)}, roots=roots)["context"]
+    skills = layer.skills_dir("project", roots["project"]).resolve()
+    assert f"Read {skills}/<name>/SKILL.md" in ctx
+
+
+def test_index_no_read_hint_when_session_runs_inside_the_project(tmp_path):
+    roots = _roots(tmp_path)
+    _seed_desc(roots, "a-skill", "use when a")
+    inside = roots["project"].parent / "sub"
+    inside.mkdir(parents=True)
+    ctx = on_session_start.on_session_start({"cwd": str(inside)}, roots=roots)["context"]
+    assert "a-skill" in ctx and "Read " not in ctx
+
+
+def test_index_no_read_hint_without_project_skills(tmp_path):
+    roots = _roots(tmp_path / "main")
+    _seed_desc(roots, "g-skill", "use when g", lvl="global")
+    worktree = tmp_path / "wt"
+    worktree.mkdir()
+    ctx = on_session_start.on_session_start({"cwd": str(worktree)}, roots=roots)["context"]
+    assert "g-skill" in ctx and "Read " not in ctx

@@ -19,7 +19,12 @@ TRUNCATION_MARK = "...[truncated]"
 
 
 def _clip(line, cap):
-    return line if len(line) <= cap else line[:cap] + TRUNCATION_MARK
+    """Clip *line* so its UTF-8 encoding stays within *cap* bytes."""
+    encoded = line.encode("utf-8")
+    if len(encoded) <= cap:
+        return line
+    truncated = encoded[:cap].decode("utf-8", errors="ignore")
+    return truncated + TRUNCATION_MARK
 
 
 def window(transcript_path, offset=0, *, max_record_bytes=None, max_window_bytes=None,
@@ -29,15 +34,20 @@ def window(transcript_path, offset=0, *, max_record_bytes=None, max_window_bytes
     path = Path(transcript_path)
     if not path.exists():
         return "", 0
-    data = path.read_bytes()
-    new_offset = len(data)
-    if not 0 <= offset <= new_offset:
-        offset = 0
+    # Seek past the offset rather than reading the file to slice it away: a hook
+    # runs per turn, and a long session's transcript is megabytes of history this
+    # call already knows it does not need.
+    with open(path, "rb") as f:
+        new_offset = f.seek(0, 2)
+        if not 0 <= offset <= new_offset:
+            offset = 0
+        f.seek(offset)
+        tail = f.read(new_offset - offset)
     lines = [_clip(line, record_cap)
-             for line in data[offset:].decode("utf-8", errors="replace").splitlines()]
+             for line in tail.decode("utf-8", errors="replace").splitlines()]
     kept, total = [], 0
     for line in reversed(lines):
-        total += len(line) + 1
+        total += len(line.encode("utf-8")) + 1
         if total > window_cap:
             kept.append(TRUNCATION_MARK)
             break
@@ -77,7 +87,8 @@ def digest(transcript_path, end_offset, *, max_exchanges=None, max_record_chars=
     path = Path(transcript_path)
     if not path.exists() or end_offset <= 0:
         return ""
-    data = path.read_bytes()[:end_offset]
+    with open(path, "rb") as f:
+        data = f.read(end_offset)
     kept, total, users_seen = [], 0, 0
     for line in reversed(data.decode("utf-8", errors="replace").splitlines()):
         try:

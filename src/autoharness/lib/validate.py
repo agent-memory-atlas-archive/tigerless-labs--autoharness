@@ -26,7 +26,7 @@ from autoharness import config
 from autoharness.lib import layer, skills_guard
 
 _FRONTMATTER = re.compile(r"\A---\n(.*?)\n---\n?", re.DOTALL)
-_PLACEHOLDER = re.compile(r"\b(TODO|FIXME|XXX):|<[A-Z][A-Z_]{2,}>")
+_PLACEHOLDER = re.compile(r"\b(TODO|FIXME|XXX):|<(?:TODO|FIXME|XXX|TBD|PLACEHOLDER|REPLACE[_ ]?ME|INSERT[_ ]?HERE|FILL[_ ]?IN)>")
 _ABS_PATH = re.compile(r"(?:/home/|/Users/|/root/)[^\s`)\]]+|[A-Za-z]:\\[^\s`)\]]+")
 _PY_REF = re.compile(r"[\w./-]+\.py")
 _SUBFILE_REF = re.compile(r"\b(?:{})/[A-Za-z0-9._/-]+".format("|".join(layer.SUBFILE_DIRS)))
@@ -51,7 +51,10 @@ def _frontmatter(body):
         if not s or s.startswith("#") or ":" not in line:
             continue
         key, value = line.split(":", 1)
-        fm[key.strip()] = value.strip().strip('"').strip("'")
+        v = value.strip()
+        if len(v) >= 2 and v[0] == v[-1] and v[0] in ('"', "'"):
+            v = v[1:-1]
+        fm[key.strip()] = v
     return fm
 
 
@@ -137,15 +140,22 @@ def _structure(body, base_dir, files=None):
             findings.append(("category",
                              f"category {cat!r} must be a single safe segment (letters/digits/._-)"))
     if base_dir is not None:
+        base = base_dir.resolve()
         for ref in set(_PY_REF.findall(body)):
             f = base_dir / ref
+            if not f.resolve().is_relative_to(base):
+                findings.append(("structure", f"referenced {ref} escapes the skill directory"))
+                continue
             if f.is_file():
                 try:
                     ast.parse(f.read_text())
                 except SyntaxError as exc:
                     findings.append(("structure", f"referenced {ref} has syntax error: {exc}"))
         for ref in set(_SUBFILE_REF.findall(body)):
-            if ref not in (files or {}) and not (base_dir / ref).is_file():
+            # escaping refs are skipped silently: writes are gated by the
+            # promoter's landing check, validation must not probe outside
+            if (base_dir / ref).resolve().is_relative_to(base) \
+                    and ref not in (files or {}) and not (base_dir / ref).is_file():
                 findings.append(("structure", f"referenced {ref} neither carried in intent nor live"))
     for rel in files or {}:
         if isinstance(rel, str) and rel not in body:

@@ -25,8 +25,10 @@ hand every model generation. autoharness bets one slice of it — the skill laye
 
 ## Install
 
-**Requires `python3` on your PATH** — autoharness runs entirely as Python (zero third-party
-dependencies); its hooks and MCP server won't fire without it.
+**Requires Python 3.11+ as the `python3` on your PATH** — autoharness runs entirely as Python
+(zero third-party dependencies); its hooks and MCP server won't fire without it. The hooks resolve
+bare `python3`, so an older interpreter earlier on your PATH (Xcode ships 3.9.6 at
+`/usr/bin/python3`) turns every hook off for the session; autoharness says so on stderr.
 
 Type these in the Claude Code input box.
 
@@ -44,10 +46,19 @@ Nothing to invoke, but one entry point exists when you want it: **`/learn`** dis
 you're in right now — say it after working something out and the lesson goes through the same
 proposal-and-validation chain the background pass uses.
 
+**MCP server naming.** The `.mcp.json` registers the server as `stage_skill`, but agent
+definitions reference the fully-qualified name `mcp__plugin_autoharness_stage_skill__stage_skill`.
+This translation is automatic: the plugin runtime constructs the qualified name from the plugin
+name in `.claude-plugin/plugin.json` (`autoharness`) and the server key in `.mcp.json`.
+Outside the plugin context (e.g., testing with `claude` directly), the tool would be available
+as `mcp__stage_skill__stage_skill` — but the agent allowlists still reference the plugin-namespaced
+form. Always install as a plugin to match both names.
+
+
 ### Update
 
-Update from a terminal — refresh the catalog, then update with the **full `plugin@marketplace`
-id**, then restart:
+Update from a terminal — refresh the catalog by marketplace name, then update the plugin by its
+**full `plugin@marketplace` id**, then restart:
 
 ```
 claude plugin marketplace update autoharness       
@@ -106,10 +117,23 @@ configure unless you want to change the pace.
 |---|---|---|
 | `AUTOHARNESS_MATURITY_PROJECT` | `100` | Probation gate, project layer: after this many requests have arrived in its layer since a skill landed, it faces graduation review. Until then it's recalled as usual but can't be archived. |
 | `AUTOHARNESS_MATURITY_GLOBAL` | `300` | Same gate for the global layer — higher because a global skill loads in every project. |
-| `AUTOHARNESS_CAPACITY_PROJECT` | `50` | Cap on *mature* skills in the project layer. It is also what bounds the session-start index: one line per live skill, so the index can never exceed the two caps combined. For graduates, capacity contention is the only death: nothing is archived until the mature pool exceeds this, then the lowest usage rates go first. |
+| `AUTOHARNESS_CAPACITY_PROJECT` | `50` | Cap on *mature* skills in the project layer. For graduates, capacity contention is the only death: nothing is archived until the mature pool exceeds this, then the lowest usage rates go first. It does not bound the session-start index: probation members are indexed too and are outside this cap, so the index is a function of the creation rate rather than of the two caps. |
 | `AUTOHARNESS_CAPACITY_GLOBAL` | `20` | Same cap for the global layer — smaller because its blast radius is every project. |
 | `AUTOHARNESS_GRADUATION_SUSPENDED` | `0` | Set to `1` to park graduation review entirely, so nothing is archived for going unused. Meant for when you have reason to doubt the recall surface: archiving on zero use would then be punishing skills for never having been offered. Capacity contention still applies. |
 | `AUTOHARNESS_SNAPSHOT_KEEP` | `5` | How many pre-run snapshots of each skill tree the curator keeps before merging. A merge is the one operation a single atomic rename can't undo. |
+
+**Notify — hearing about it as it happens**
+
+Off by default. The session-start summary line reports a run one session late, with counts but no
+names; these push the same run account out as soon as a drain finishes. Fail-open: the notifier runs
+only after the account is written and the intent queue cleared, so a missing, failing or hung
+notifier can delay a drain but never fail or replay it.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `AUTOHARNESS_NOTIFY` | _(unset)_ | Set to `desktop` for a native notification per run — `osascript` on macOS, `notify-send` on Linux when installed (a silent no-op otherwise). Names what landed and what was rejected, e.g. `create foo, patch bar · rejected: baz`. On macOS the notification is attributed to Script Editor; if nothing appears, allow it under System Settings → Notifications. |
+| `AUTOHARNESS_NOTIFY_CMD` | _(unset)_ | A command (split like a shell argv, never run through a shell) that receives the run record JSON — the same shape as `runs/<run-id>.json` — on stdin, with the one-line summary in `AUTOHARNESS_NOTIFY_SUMMARY`. The hook for Slack, webhooks, or anything else. Skill names are redacted first, and the command runs with the child-session guard set, so a notifier that launches `claude` isn't itself captured. Works alongside `desktop`. |
+| `AUTOHARNESS_NOTIFY_TIMEOUT_S` | `5` | Whole seconds, minimum 1, per channel: how long a notifier may hold up a drain. The `/learn` drain runs inside the host's Stop hook, so this is also the most it can delay a turn. |
 
 Set them in the environment Claude Code launches with — either the shell
 (`export AUTOHARNESS_REFLECT_EVERY_N=10`) or the `env` map in `.claude/settings.json`:

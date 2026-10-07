@@ -41,3 +41,6 @@ pattern = '''(?<!\d)(\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}(?!\d)'''
 [[pii]]
 name = "credit_card"
 pattern = '''(?<!\d)(?:\d[ -]?){13,16}(?!\d)'''
+# luhn gate: 13-16 digit runs failing the checksum (snowflake ids, ms timestamps, numeric pks)
+# stay in the stream as evidence; real card numbers pass by construction.
+validate = "luhn"

@@ -1,4 +1,7 @@
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -226,6 +229,51 @@ def test_emit_session_start_no_context_prints_nothing(capsys):
     assert capsys.readouterr().out == ""
 
 
+# --- _emit deny output: the host reads stdout, not the return value, so the write
+# backstop's stdout JSON is the security boundary and needs its own coverage (#138) ---
+
+
+def test_emit_deny_writes_permission_decision_to_stdout(capsys):
+    dispatch._emit({"deny": True, "reason": "reflector may only stage intents, not write files"})
+    payload = json.loads(capsys.readouterr().out)
+    hso = payload["hookSpecificOutput"]
+    assert hso["hookEventName"] == "PreToolUse"
+    assert hso["permissionDecision"] == "deny"
+    assert hso["permissionDecisionReason"] == "reflector may only stage intents, not write files"
+
+
+def test_emit_deny_falls_back_to_a_reason_when_absent(capsys):
+    # a deny without a reason must still deny, with a non-empty reason the host can show
+    dispatch._emit({"deny": True})
+    hso = json.loads(capsys.readouterr().out)["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert hso["permissionDecisionReason"]
+
+
+def test_emit_deny_is_single_line_json_on_stdout_only(capsys):
+    # the host parses one JSON object per hook invocation: a wrapped payload would not parse
+    dispatch._emit({"deny": True, "reason": "no"})
+    captured = capsys.readouterr()
+    assert len(captured.out.strip().splitlines()) == 1
+    assert captured.err == ""
+
+
+def test_denied_reflector_write_reaches_the_host_as_deny_json(tmp_path, capsys):
+    # end to end through the dispatcher: dispatch() decides, _emit is what the host actually reads
+    dispatch._emit(dispatch.dispatch({"hook_event_name": "PreToolUse", "tool_name": "Write",
+                                       "agent_type": "autoharness:reflector"}, roots=_roots(tmp_path)))
+    hso = json.loads(capsys.readouterr().out)["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert "stage intents" in hso["permissionDecisionReason"]
+
+
+def test_denied_child_write_reaches_the_host_as_deny_json(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv(config.CHILD_SESSION_ENV, "1")
+    dispatch._emit(dispatch.dispatch({"hook_event_name": "PreToolUse", "tool_name": "Write",
+                                       "session_id": "s7"}, roots=_roots(tmp_path)))
+    assert json.loads(capsys.readouterr().out)["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
 # --- Phase 11 (H): every PreToolUse advances the activity counter; Stop no longer bumps it ---
 
 def test_pretooluse_advances_activity_counter(tmp_path):
@@ -298,3 +346,51 @@ def test_stop_with_empty_interactive_queue_writes_no_run_account(tmp_path, monke
     state = layer.state_dir("project", roots["project"])
     assert not (state / "last_run.json").exists()
     assert not list((state / "runs").glob("*.json")) if (state / "runs").exists() else True
+
+
+def _run_under_old_python(tmp_path, version=(3, 9, 6, "final", 0)):
+    # the host's bare `python3` may be older than the 3.11 floor (Xcode ships 3.9.6 at
+    # /usr/bin/python3); simulate it in a child by pinning version_info and hiding tomllib,
+    # which is the stdlib module that entered in 3.11 and that redact.py imports at module level
+    probe = tmp_path / "old_python_probe.py"
+    probe.write_text(
+        "import sys\n"
+        f"sys.version_info = {version!r}\n"
+        "class _NoTomllib:\n"
+        "    def find_spec(self, name, path=None, target=None):\n"
+        "        if name == 'tomllib':\n"
+        "            raise ModuleNotFoundError(\"No module named 'tomllib'\", name='tomllib')\n"
+        "        return None\n"
+        "sys.meta_path.insert(0, _NoTomllib())\n"
+        "import autoharness.hook.dispatch\n"
+    )
+    root = Path(__file__).resolve().parents[1]
+    return subprocess.run(
+        [sys.executable, str(probe)], capture_output=True, text=True,
+        env={"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(root / "src")},
+    )
+
+
+def test_below_floor_python_exits_clean_instead_of_crashing_at_import(tmp_path):
+    # hooks.json invokes bare `python3` for all four events, and every import in the chain is
+    # module level, so an interpreter below the floor dies before dispatch() is entered and the
+    # fail-safe handler never gets the chance to catch it: the whole plugin goes off silently
+    r = _run_under_old_python(tmp_path)
+    assert r.returncode == 0, f"expected a clean exit, got {r.returncode}:\n{r.stderr}"
+    assert "Traceback" not in r.stderr
+    assert "tomllib" not in r.stderr
+
+
+def test_below_floor_python_names_the_floor_and_the_interpreter(tmp_path):
+    # the point of the guard is that the operator can act on it: a generic host hook error with
+    # nothing logged is what this replaces
+    r = _run_under_old_python(tmp_path)
+    assert "3.11" in r.stderr
+    assert "3.9" in r.stderr
+    assert "hooks.json" in r.stderr
+
+
+def test_supported_python_still_imports_and_dispatches(tmp_path):
+    # the guard must not fire on a supported interpreter
+    assert dispatch.dispatch({"hook_event_name": "Nope"}) == {
+        "ignored": True, "reason": "unrouted event: 'Nope'"}

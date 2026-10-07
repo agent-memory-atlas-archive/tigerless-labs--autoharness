@@ -72,7 +72,8 @@ def test_full_skill_lifecycle_through_dispatch(tmp_path, capsys):
     for _ in range(2):
         dispatch.dispatch({"hook_event_name": "PreToolUse", "tool_name": "Skill",
                            "tool_input": {"name": "learned"}}, roots=roots)
-    assert sidecar.read("project", "learned", proot)["use"] + sidecar.read("project", "learned", proot)["view"] == 2
+    sc = sidecar.read("project", "learned", proot)
+    assert sc["use"] == 2 and sc["view"] == 0
     print(f"[use]    learned use={sidecar.read('project', 'learned', proot)['use']} view={sidecar.read('project', 'learned', proot)['view']}")
 
     # BEAT 3 — compete: a weak unused peer; MNG recompute (SessionStart) archives the loser.

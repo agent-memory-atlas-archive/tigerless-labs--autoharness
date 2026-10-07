@@ -135,11 +135,26 @@ def test_project_root_worktree_outside_repo_maps_to_main_root(main_repo, tmp_pat
     assert _project_root_at(monkeypatch, wt) == main_repo / ".claude"
 
 
+def test_worktree_root_cache_normalizes_symlink(linked_worktree, main_repo, tmp_path, dir_link):
+    alias = tmp_path / "worktree-alias"
+    dir_link(alias, linked_worktree)
+    layer._main_worktree_root_resolved.cache_clear()
+
+    assert layer._main_worktree_root(str(alias)) == main_repo
+    after_alias = layer._main_worktree_root_resolved.cache_info()
+    assert layer._main_worktree_root(str(linked_worktree)) == main_repo
+    after_real_path = layer._main_worktree_root_resolved.cache_info()
+
+    assert after_alias.misses == 1
+    assert after_real_path.hits == after_alias.hits + 1
+    assert after_real_path.misses == after_alias.misses
+
+
 def test_project_root_git_failure_falls_back_to_cwd(linked_worktree, monkeypatch):
     def boom(*args, **kwargs):
         raise FileNotFoundError("git not installed")
     monkeypatch.setattr(layer.subprocess, "run", boom)
-    layer._main_worktree_root.cache_clear()
+    layer._main_worktree_root_resolved.cache_clear()
     assert _project_root_at(monkeypatch, linked_worktree) == linked_worktree / ".claude"
 
 

@@ -167,6 +167,36 @@ def test_referenced_py_syntax_error_rejected(tmp_path):
     assert "structure" in _families(validate.validate(GOOD_INTENT, body, base_dir=tmp_path))
 
 
+
+def test_referenced_py_escaping_ref_is_not_read(tmp_path):
+    # a syntax-error file OUTSIDE base_dir doubles as the proof of the read:
+    # vulnerable code reports its syntax error; fixed code reports the escape
+    # and never opens the file
+    secret = tmp_path.parent / "secret_escape.py"
+    secret.write_text("def broken(:\n")
+    try:
+        body = "---\nname: foo\ndescription: d\n---\nSee `../secret_escape.py`.\n"
+        msgs = [m for _, m in validate.validate(GOOD_INTENT, body, base_dir=tmp_path)["findings"]]
+        assert any("escapes the skill directory" in m for m in msgs)
+        assert not any("secret_escape.py has syntax error" in m for m in msgs)
+    finally:
+        secret.unlink()
+
+def test_referenced_subfile_escaping_ref_is_not_probed(tmp_path):
+    # an escaping ref aimed at nothing outside must not be probed at all:
+    # vulnerable code reports it as "neither carried in intent nor live"
+    body = ("---\nname: foo\ndescription: Use when you need the helper.\n---\n"
+            "Run references/../../outside_dir_escape/x.md\n")
+    msgs = [m for _, m in validate.validate(GOOD_INTENT, body, base_dir=tmp_path)["findings"]]
+    assert not any("outside_dir_escape" in m for m in msgs)
+def test_referenced_py_benign_relative_ref_still_validated(tmp_path):
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "helper.py").write_text("def f(:\n")
+    body = "---\nname: foo\ndescription: d\n---\nSee `sub/helper.py`.\n"
+    msgs = [m for _, m in validate.validate(GOOD_INTENT, body, base_dir=tmp_path)["findings"]]
+    assert any("helper.py has syntax error" in m for m in msgs)
+    assert not any("escapes the skill directory" in m for m in msgs)
+
 # --- folder-skill: files gate + referenced/pointer rules ---
 
 FILES_BODY = "---\nname: foo\ndescription: Use when you need the helper.\n---\n# Foo\nRun scripts/run.sh\n"
@@ -284,3 +314,15 @@ def test_category_rejects_path_and_unsafe_segments():
         v = validate.validate({"action": "create", "level": "project", "name": "x",
                                "reason": "r", "evidence": "e"}, _body_with_category(bad))
         assert [f for f in v["findings"] if f[0] == "category"], bad
+
+def test_frontmatter_mixed_quotes():
+    # Single quote wrapping double quote should not be stripped
+    body = "---\nname: foo\ndescription: 'he said \"hello\"'\n---\n# Foo\n"
+    from autoharness.lib.validate import _frontmatter
+    fm = _frontmatter(body)
+    assert fm["description"] == 'he said "hello"'
+    
+    # Unmatched quotes should not be stripped
+    body2 = "---\nname: bar\ndescription: \"unmatched'\n---\n# Bar\n"
+    fm2 = _frontmatter(body2)
+    assert fm2["description"] == "\"unmatched'"

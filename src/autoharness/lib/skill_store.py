@@ -9,10 +9,23 @@ LED/sidecar); landing a delete and MNG (Phase 6) eviction share this one path.
 """
 import os
 import shutil
+import time
 
 from autoharness.lib import atomic, layer
 
 SKILL_FILE = "SKILL.md"
+
+
+def _collision_safe_dest(dest):
+    if not dest.exists():
+        return dest
+    suffix = time.strftime("%Y%m%dT%H%M%S")
+    candidate = dest.with_name(f"{dest.name}.{suffix}")
+    counter = 2
+    while candidate.exists():
+        candidate = dest.with_name(f"{dest.name}.{suffix}.{counter}")
+        counter += 1
+    return candidate
 
 
 def skill_path(lyr, name, root=None):
@@ -61,8 +74,7 @@ def archive(lyr, name, root=None):
         return None
     dest = layer.archive_dir(lyr, root) / name
     dest.parent.mkdir(parents=True, exist_ok=True)
-    if dest.exists():
-        shutil.rmtree(dest)
+    dest = _collision_safe_dest(dest)
     os.replace(sdir, dest)
     return dest
 
@@ -73,8 +85,7 @@ def restore(lyr, name, root=None):
         return None
     dest = layer.symbol_dir(lyr, name, root)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    if dest.exists():
-        shutil.rmtree(dest)
+    dest = _collision_safe_dest(dest)
     os.replace(src, dest)
     return dest
 

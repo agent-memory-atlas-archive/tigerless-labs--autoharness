@@ -64,6 +64,14 @@ CAPACITY = {layer.GLOBAL: _int_env("AUTOHARNESS_CAPACITY_GLOBAL", 20),
 GRADUATION_REVIEW_SUSPENDED = bool(_int_env("AUTOHARNESS_GRADUATION_SUSPENDED", 0))
 SNAPSHOT_KEEP = _int_env("AUTOHARNESS_SNAPSHOT_KEEP", 5)  # curator pre-run library snapshots per layer (mirrors Hermes)
 
+# run-account notification (lib/notify), opt-in: the SessionStart summary is a session late and
+# carries counts, not names. "desktop" = native notification; NOTIFY_CMD = argv fed the run record
+# on stdin. Fail-open, fired after the queue is cleared; the timeout (whole seconds, per channel,
+# floor 1) bounds how long a notifier can hold a drain — the interactive one runs inside Stop.
+NOTIFY = os.environ.get("AUTOHARNESS_NOTIFY", "").strip().lower()
+NOTIFY_CMD = os.environ.get("AUTOHARNESS_NOTIFY_CMD", "")
+NOTIFY_TIMEOUT_S = max(1, _int_env("AUTOHARNESS_NOTIFY_TIMEOUT_S", 5))
+
 _LIB = Path(__file__).parent / "lib"
 REDACTION_RULES = _LIB / "redaction_rules.toml"  # secret/PII rule set, single source for CAP egress + LED
 FORMAT_SPEC = _LIB / "format_spec.md"            # #416 single source for authoring + lint

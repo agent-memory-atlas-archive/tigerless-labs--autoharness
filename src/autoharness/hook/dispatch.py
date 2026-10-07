@@ -15,21 +15,39 @@ platform contract pins the details:
 
 ponytail: detached launch is a fire-and-forget Popen; robustness of orphan / timeout isolation left for observation.
 """
+import hashlib
 import json
 import os
 import re
 import subprocess
 import sys
 
-from autoharness import config
-from autoharness.hook import (
+MIN_PYTHON = (3, 11)  # tomllib (lib/redact.py) entered the stdlib here; README badge and CI matrix pin the same floor
+
+
+def _below_floor(version):
+    return (f"autoharness: needs Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]}+, got "
+            f"{version[0]}.{version[1]} at {sys.executable}. Every hook is off for this session; "
+            f"point the hooks.json commands at a newer interpreter.")
+
+
+# this guard runs before the package imports on purpose: the chain below is module level end to end
+# (dispatch -> promoter -> redact -> tomllib), so on an older interpreter the process dies at import
+# and the fail-safe in dispatch() never gets the chance to catch it -- the host shows a generic hook
+# error and nothing inside the plugin names the cause. Exit 0: a host hook must not fail the session.
+if sys.version_info[:2] < MIN_PYTHON:
+    print(_below_floor(sys.version_info), file=sys.stderr)
+    raise SystemExit(0)
+
+from autoharness import config  # noqa: E402
+from autoharness.hook import (  # noqa: E402
     on_session_end,
     on_session_start,
     on_skill_call,
     on_stop,
     promoter,
 )
-from autoharness.lib import counters, layer
+from autoharness.lib import counters, layer  # noqa: E402
 
 _SANITIZE = re.compile(r"[^A-Za-z0-9_-]")
 _WRITE_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
@@ -40,12 +58,18 @@ def _roots(roots):
 
 
 def _run_id(result):
-    sid = _SANITIZE.sub("", str(result.get("session_id") or "")) or "run"
+    raw = str(result.get("session_id") or "")
+    sid = _SANITIZE.sub("", raw)
+    if not sid:
+        sid = hashlib.sha256(raw.encode()).hexdigest()[:8] if raw else "run"
     return f"{sid}-{result.get('count', 0)}"
 
 
 def _curate_run_id(event, pcount):
-    sid = _SANITIZE.sub("", str(event.get("session_id") or "")) or "run"
+    raw = str(event.get("session_id") or "")
+    sid = _SANITIZE.sub("", raw)
+    if not sid:
+        sid = hashlib.sha256(raw.encode()).hexdigest()[:8] if raw else "run"
     return f"{sid}-c{pcount}"  # keyed on the monotonic request count → unique per curator launch
 
 
@@ -55,13 +79,17 @@ def _is_reflector(event):
 
 
 def _detached_launch(transcript_path, session_id, run_id, roots):
-    subprocess.Popen(  # host-detach: fire-and-forget so the Stop hook returns immediately
-        [sys.executable, "-m", "autoharness.hook.spawn",
-         str(transcript_path), str(session_id), run_id,
-         str(roots[layer.PROJECT]), str(roots[layer.GLOBAL])],
-        start_new_session=True, stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-    )
+    try:
+        subprocess.Popen(  # host-detach: fire-and-forget so the Stop hook returns immediately
+            [sys.executable, "-m", "autoharness.hook.spawn",
+             str(transcript_path), str(session_id), run_id,
+             str(roots[layer.PROJECT]), str(roots[layer.GLOBAL])],
+            start_new_session=True, stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+    except OSError as exc:
+        return {"error": f"detached_launch failed: {type(exc).__name__}: {exc}"}
+    return None
 
 
 def _reflect(event, result, roots, launch=None):
@@ -144,6 +172,10 @@ def _emit(verdict):
             "hookEventName": "SessionStart",
             "additionalContext": result["context"],
         }}))
+        return
+    handled = verdict.get("handled")
+    if handled:
+        print(json.dumps({"handled": handled, "result": result}), file=sys.stderr)
 
 
 def main():
