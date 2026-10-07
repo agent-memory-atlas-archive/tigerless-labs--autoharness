@@ -1,3 +1,8 @@
+import os
+import subprocess
+import sys
+from pathlib import Path
+
 from autoharness.lib import sidecar
 
 
@@ -67,3 +72,39 @@ def test_reuse_after_patch_marked_on_first_use(tmp_path):
     sidecar.bump_use("project", "p", tmp_path)
     d = sidecar.read("project", "p", tmp_path)
     assert d["reused_gen"] == d["patch"]  # first use after patch marks the reuse generation
+
+
+def test_bumps_preserve_all_counters_across_processes(tmp_path):
+    sidecar.create("project", "shared", anchor=42, root=tmp_path)
+    code = (
+        "import pathlib, sys, time\n"
+        "from autoharness.lib import sidecar\n"
+        "root = pathlib.Path(sys.argv[1])\n"
+        "original_read = sidecar.read\n"
+        "def delayed_read(*args, **kwargs):\n"
+        "    data = original_read(*args, **kwargs)\n"
+        "    time.sleep(0.001)\n"
+        "    return data\n"
+        "sidecar.read = delayed_read\n"
+        "for _ in range(20):\n"
+        "    sidecar.bump_use('project', 'shared', root)\n"
+        "    sidecar.bump_view('project', 'shared', root)\n"
+        "    sidecar.bump_patch('project', 'shared', root)\n"
+    )
+    env = {**os.environ, "PYTHONPATH": str(Path(sidecar.__file__).parents[2])}
+    procs = [subprocess.Popen([sys.executable, "-c", code, str(tmp_path)], env=env)
+             for _ in range(4)]
+    try:
+        assert [p.wait(timeout=30) for p in procs] == [0, 0, 0, 0]
+    finally:
+        for p in procs:
+            if p.poll() is None:
+                p.kill()
+                p.wait()
+
+    data = sidecar.read("project", "shared", tmp_path)
+    assert (data["use"], data["view"], data["patch"]) == (80, 80, 80)
+    assert data["anchor"] == 42
+    assert data["created_by"] == "agent"
+    sidecar.bump_use("project", "shared", tmp_path)
+    assert sidecar.read("project", "shared", tmp_path)["reused_gen"] == 80
