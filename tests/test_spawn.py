@@ -377,7 +377,9 @@ def test_detached_spawn_reports_child_crash_on_stderr(capsys):
 
 def test_run_records_spawn_error_in_run_account(tmp_path):
     roots = _roots(tmp_path)
-    crash = subprocess.CompletedProcess([config.CLAUDE_BIN], 3, "", "Error: agent not found")
+    secret = "ghp_" + "a" * 36
+    crash = subprocess.CompletedProcess([config.CLAUDE_BIN], 3, "",
+                                        f"Error: agent not found; token={secret}")
     verdicts = spawn.run("WINDOW", "run-x", roots=roots, spec_path=config.FORMAT_SPEC,
                          spawn_fn=lambda a, e, b: crash)
     assert verdicts == []
@@ -385,9 +387,11 @@ def test_run_records_spawn_error_in_run_account(tmp_path):
     assert account["run_id"] == "run-x"
     assert account["spawn_error"]["returncode"] == 3
     assert "agent not found" in account["spawn_error"]["stderr_tail"]
+    assert secret not in account["spawn_error"]["stderr_tail"]
+    assert "REDACTED" in account["spawn_error"]["stderr_tail"]
 
 
-def test_spawn_error_record_defers_to_landed_verdicts(tmp_path):
+def test_spawn_error_record_preserves_landed_verdicts(tmp_path):
     roots = _roots(tmp_path)
 
     def crashed_after_staging(argv, env, bundle):
@@ -403,7 +407,8 @@ def test_spawn_error_record_defers_to_landed_verdicts(tmp_path):
                          spawn_fn=crashed_after_staging)
     assert [v["ok"] for v in verdicts] == [True]
     account = json.loads((roots["project"] / "autoharness" / "runs" / "run-x.json").read_text())
-    assert "spawn_error" not in account and account["verdicts"]  # verdicts keep precedence
+    assert account["spawn_error"]["returncode"] == 3
+    assert account["verdicts"]  # child diagnostics augment, never replace, promoter verdicts
 
 
 def test_successful_spawn_writes_no_spawn_error(tmp_path):
