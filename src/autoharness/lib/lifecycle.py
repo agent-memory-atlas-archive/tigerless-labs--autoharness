@@ -38,6 +38,8 @@ def evaluate(members, request_count, *, maturity, capacity, review_suspended=Fal
             continue  # spared zero-use symbols stay out of the pool either way
         survivors.append((_rate(use, denom), m["name"]))
     if len(survivors) > capacity:
-        survivors.sort(key=lambda rn: (rn[0], hashlib.md5(rn[1].encode()).digest()))  # rate then deterministic hash
+        survivors.sort(
+            key=lambda rn: (rn[0], hashlib.sha256(rn[1].encode()).digest())
+        )  # rate then deterministic hash
         archive.update(name for _, name in survivors[: len(survivors) - capacity])
     return sorted(archive)
