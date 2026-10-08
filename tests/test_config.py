@@ -102,7 +102,8 @@ def test_int_knob_falls_back_to_default_on_non_numeric(monkeypatch):
     # is indistinguishable from an unset one. Pin that, so the fallback is a
     # decision on record rather than an accident nobody looked for.
     monkeypatch.setenv("AUTOHARNESS_SNAPSHOT_KEEP", "five")
-    importlib.reload(config)
+    with pytest.warns(UserWarning, match="not a valid integer"):
+        importlib.reload(config)
     try:
         assert config.SNAPSHOT_KEEP == 5
     finally:

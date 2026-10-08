@@ -6,13 +6,13 @@ values. Overridable via AUTOHARNESS_* env — for the e2e runbook to shrink the 
 capacity contention fire within a short session); defaults fall back to the placeholders.
 """
 import os
+import warnings
 from pathlib import Path
 
 from autoharness.lib import layer
 
 
 def _int_env(name, default):
-    import warnings
     try:
         return int(os.environ[name])
     except KeyError:
@@ -54,8 +54,11 @@ INDEX_DESC_MAX_CHARS = _int_env("AUTOHARNESS_INDEX_DESC_MAX_CHARS", 60)
 def _bool_env(name, default):
     val = _int_env(name, int(default))
     if val not in (0, 1):
-        import warnings
-        warnings.warn(f"{name}={val} should be 0 or 1; treating non-zero as True", stacklevel=2)
+        warnings.warn(
+            f"{name}={val} should be 0 or 1; using default {int(default)}",
+            stacklevel=2,
+        )
+        return bool(default)
     return bool(val)
 
 
