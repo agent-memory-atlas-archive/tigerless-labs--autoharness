@@ -93,6 +93,8 @@ def _schema_errors(params):
             level = params.get("level", layer.PROJECT)
             if level not in layer.LAYERS:
                 errors.append(("schema", f"level must be one of {layer.LAYERS}, got {level!r}"))
+            elif level == layer.GLOBAL and config.DISABLE_GLOBAL:
+                errors.append(("routing", "global layer is disabled by AUTOHARNESS_DISABLE_GLOBAL"))
     elif action == "patch":
         if has_body:
             errors.append(("schema", "patch takes old_string/new_string, not body"))

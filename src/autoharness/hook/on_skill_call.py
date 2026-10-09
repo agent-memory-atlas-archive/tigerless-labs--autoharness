@@ -33,7 +33,7 @@ def _name_from_read_path(event, roots):
     if not isinstance(file_path, str) or not file_path.strip():
         return None
     target = Path(file_path)
-    for lyr in layer.LAYERS:
+    for lyr in config.active_layers():
         base = layer.skills_dir(lyr, roots.get(lyr))
         try:
             rel = target.resolve().relative_to(base.resolve())

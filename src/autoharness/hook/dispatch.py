@@ -120,7 +120,8 @@ def dispatch(event, *, roots=None, reflect=None, consolidate=None):
         if name == "Stop":
             if os.environ.get(config.CHILD_SESSION_ENV):
                 return {"handled": name, "result": {"triggered": False, "reason": "recursion_guard"}}
-            counters.bump_request(layer.GLOBAL, roots.get(layer.GLOBAL))  # MNG denominator (per turn)
+            if not config.DISABLE_GLOBAL:
+                counters.bump_request(layer.GLOBAL, roots.get(layer.GLOBAL))  # MNG denominator (per turn)
             pcount = counters.bump_request(layer.PROJECT, proot)
             promoter.drain(config.INTERACTIVE_RUN_ID, roots=roots)  # /learn and other in-session proposals; no-op when empty
             result = on_stop.on_stop(event, root=proot)

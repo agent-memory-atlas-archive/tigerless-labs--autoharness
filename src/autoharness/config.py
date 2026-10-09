@@ -63,6 +63,13 @@ def _bool_env(name, default):
 
 
 INDEX_SUSPENDED = _bool_env("AUTOHARNESS_INDEX_SUSPENDED", False)
+DISABLE_GLOBAL = _bool_env("AUTOHARNESS_DISABLE_GLOBAL", False)
+
+
+def active_layers():
+    """Layers this deployment may inspect and manage."""
+    return (layer.PROJECT,) if DISABLE_GLOBAL else layer.LAYERS
+
 
 # folder-skill subfile caps (ponytail: placeholders like STAGE_MAX_BODY_BYTES, calibrate in experiments/)
 STAGE_MAX_FILES = 8
