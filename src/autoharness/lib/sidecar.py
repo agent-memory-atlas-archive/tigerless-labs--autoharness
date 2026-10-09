@@ -17,7 +17,7 @@ hooks preserve independent use/view/patch increments and the reuse generation.
 """
 import json
 
-from autoharness.lib import atomic, counters, layer
+from autoharness.lib import atomic, layer, lock
 
 FILENAME = ".sidecar.json"
 
@@ -52,17 +52,12 @@ def create(lyr, name, anchor, root=None):
 
 def _bump(lyr, name, key, root=None):
     lock_path = path(lyr, name, root).with_suffix(".json.lock")
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(lock_path, "a") as lock_fd:
-        counters._lock(lock_fd)
-        try:
-            data = read(lyr, name, root)
-            data[key] = data.get(key, 0) + 1
-            if key == "use" and data.get("patch", 0) > data.get("reused_gen", 0):
-                data["reused_gen"] = data["patch"]  # first use after a patch = reuse-after-improvement
-            write(lyr, name, data, root)
-        finally:
-            counters._unlock(lock_fd)
+    with lock.file_lock(lock_path):
+        data = read(lyr, name, root)
+        data[key] = data.get(key, 0) + 1
+        if key == "use" and data.get("patch", 0) > data.get("reused_gen", 0):
+            data["reused_gen"] = data["patch"]  # first use after a patch = reuse-after-improvement
+        write(lyr, name, data, root)
     return data[key]
 
 
