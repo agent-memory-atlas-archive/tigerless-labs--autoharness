@@ -67,3 +67,13 @@ def test_unknown_validator_name_fails_loud_at_rule_load():
         import os
 
         os.unlink(bad.name)
+
+
+def test_secret_hits_honors_rule_validator(tmp_path):
+    rules = tmp_path / "rules.toml"
+    rules.write_text(
+        '[[secret]]\nname = "checked_number"\npattern = \'[0-9]{11}\'\nvalidate = "luhn"\n'
+    )
+
+    assert redact.secret_hits("invalid 79927398714", rules) == []
+    assert redact.secret_hits("valid 79927398713", rules) == ["checked_number"]
