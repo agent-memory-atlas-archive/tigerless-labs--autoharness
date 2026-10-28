@@ -16,6 +16,7 @@ session started in <repo>/.claude/skills): that dir holds the project's config a
 itself, so it maps to the dir that owns it. Any git failure falls back to the dir itself (fail-safe).
 A reflector/curator child session skips all of this: spawn pins the parent's resolved root in its env.
 """
+import hashlib
 import os
 import re
 import subprocess
@@ -150,3 +151,10 @@ def check_subfile(rel, *, new=False):
 def subfile_path(layer, name, rel, root=None):
     check_subfile(rel)
     return symbol_dir(layer, name, root) / rel
+
+
+def symbol_lock_path(lyr, name, root=None):
+    """A symbol's stable lock, outside the directory that archive moves."""
+    _check_name(name)
+    key = hashlib.sha256(name.casefold().encode("utf-8")).hexdigest()
+    return state_dir(lyr, root) / "symbol-locks" / f"{key}.lock"
